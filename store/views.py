@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 import json
+import datetime
 from .models import *
 # Create your views here.
 
@@ -13,7 +14,7 @@ def store(request):
         cartItems=order.get_cart_item
     else:    
         items=[]        
-        order={'get_cart_item':0,'get_cart_total':0}
+        order={'get_cart_item':0,'get_cart_total':0,'shipping':False}
         cartItems=order['get_cart_item']
 
     products=Product.objects.all()
@@ -29,7 +30,7 @@ def cart(request):
 
     else:
         items=[]        
-        order={'get_cart_item':0,'get_cart_total':0}
+        order={'get_cart_item':0,'get_cart_total':0,'shipping':False}
         cartItems=order['get_cart_item']    
     context={'items':items,'order':order,'cartItems':cartItems}
     return render(request,'store/cart.html',context)
@@ -43,7 +44,7 @@ def checkout(request):
         items = order.orderitem_set.all()
     else:
         items=[]        
-        order={'get_cart_item':0,'get_cart_total':0}
+        order={'get_cart_item':0,'get_cart_total':0,'shipping':False}
         cartItems=order['get_cart_item']        
     context={'items':items,'order':order,'cartItems':cartItems}
     return render(request,'store/checkout.html',context)        
@@ -53,8 +54,8 @@ def updateItem(request):
     data = json.loads(request.body)
     productId = data['productId']
     action = data['action']
-    print('Action:', action)
-    print('Product:', productId)
+    # print('Action:', action)
+    # print('Product:', productId)
     
     product=Product.objects.get(id=productId)
     customer= request.user.customer
@@ -62,9 +63,46 @@ def updateItem(request):
     orderItem, created = OrderItem.objects.get_or_create(order=order,product=product)
     if action=='add':
         orderItem.quantity=(orderItem.quantity+1)
+
+    elif action =='delete':
+        # orderItem.delete()
+        orderItem.quantity=(orderItem.quantity - orderItem.quantity)
+
     elif action =='remove':
         orderItem.quantity=(orderItem.quantity - 1)
-    orderItem.save()    
+
+
+    orderItem.save()
+  
     if orderItem.quantity<=0:
         orderItem.delete()
     return JsonResponse('Item was added', safe=False)
+
+
+def processOrder(request):
+    transaction_id=datetime.datetime.now().timestamp()
+
+    if request.user.is_authenticated:
+        customer = request.user.customer
+        data= json.loads(request.body)
+        order, created = Order.objects.get_or_create(customer=customer,complete=False)        
+        total =float(data['form']['total'])
+        order.transaction_id = transaction_id
+
+        if total == order.get_cart_total:
+            order.complete=True
+        order.save()    
+
+        if order.shipping == True:
+            ShippingAddress.objects.create(
+                customer = customer,
+                order=order,
+                address = data['shipping']['address'],
+                city = data['shipping']['city'],
+                state = data['shipping']['state'],
+                zipcode = data['shipping']['zipcode'],
+                )   
+
+    else:
+        return('user is not logged in ')            
+    return JsonResponse('Payment complete',safe=False)
